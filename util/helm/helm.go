@@ -1,3 +1,17 @@
+// Copyright 2018 The Kubeflow Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//       http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package helm
 
 import (
@@ -187,6 +201,39 @@ func ListReleaseMap() (releaseMap map[string]string, err error) {
 			if len(cols) > 1 {
 				log.Debugf("releaseMap: %s=%s\n", cols[0], cols[len(cols)-1])
 				releaseMap[cols[0]] = cols[len(cols)-1]
+			}
+		}
+	}
+
+	return releaseMap, nil
+}
+
+func ListAllReleasesWithDetail() (releaseMap map[string][]string, err error) {
+	releaseMap = map[string][]string{}
+	_, err = exec.LookPath(helmCmd[0])
+	if err != nil {
+		return releaseMap, err
+	}
+
+	cmd := exec.Command(helmCmd[0], "list", "--all")
+	// support multiple cluster management
+	if types.KubeConfig != "" {
+		cmd.Env = append(cmd.Env, fmt.Sprintf("KUBECONFIG=%s", types.KubeConfig))
+	}
+	out, err := cmd.Output()
+	if err != nil {
+		return releaseMap, err
+	}
+	lines := strings.Split(string(out), "\n")
+
+	for _, line := range lines {
+		line = strings.Trim(line, " ")
+		if !strings.Contains(line, "NAME") {
+			cols := strings.Fields(line)
+			log.Debugf("cols: ", cols, len(cols))
+			if len(cols) > 3 {
+				log.Debugf("releaseMap: %s=%s\n", cols[0], cols)
+				releaseMap[cols[0]] = cols
 			}
 		}
 	}

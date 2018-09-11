@@ -1,3 +1,17 @@
+// Copyright 2018 The Kubeflow Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//       http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package commands
 
 import (
@@ -9,6 +23,7 @@ import (
 	"github.com/kubeflow/arena/util/helm"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 var (
@@ -34,13 +49,13 @@ func NewSubmitTFJobCommand() *cobra.Command {
 
 			util.SetLogLevel(logLevel)
 			setupKubeconfig()
-			client, err := initKubeClient()
+			_, err := initKubeClient()
 			if err != nil {
 				fmt.Println(err)
 				os.Exit(1)
 			}
 
-			err = ensureNamespace(client, namespace)
+			err = ensureNamespace(clientset, namespace)
 			if err != nil {
 				fmt.Println(err)
 				os.Exit(1)
@@ -91,6 +106,8 @@ type submitTFJobArgs struct {
 	PSCpu          string `yaml:"psCPU"`          // --psCpu
 	PSMemory       string `yaml:"psMemory"`       // --psMemory
 	CleanPodPolicy string `yaml:"cleanPodPolicy"` // --cleanTaskPolicy
+	// determine if it has gang scheduler
+	HasGangScheduler bool `yaml:"hasGangScheduler"`
 
 	// for common args
 	submitArgs `yaml:",inline"`
@@ -119,6 +136,9 @@ func (submitArgs *submitTFJobArgs) prepare(args []string) (err error) {
 	if err != nil {
 		return err
 	}
+
+	// process tensorboard
+	submitArgs.processTensorboad()
 
 	commonArgs := &submitArgs.submitArgs
 	err = commonArgs.transform()
@@ -195,15 +215,29 @@ func (submitArgs *submitTFJobArgs) transform() error {
 		}
 	}
 
-	if submitArgs.UseTensorboard {
-		submitArgs.HostLogPath = fmt.Sprintf("/arena_logs/training%s", util.RandomInt32())
-	}
+	// check Gang scheduler
+	submitArgs.checkGangCapablitiesInCluster()
 
 	return nil
 }
 
 func (submitArgs *submitTFJobArgs) addTFJobInfoToEnv() {
 	submitArgs.addJobInfoToEnv()
+}
+
+func (submitArgs *submitTFJobArgs) checkGangCapablitiesInCluster() {
+	gangCapablity := false
+	if clientset != nil {
+		_, err := clientset.AppsV1beta1().Deployments(metav1.NamespaceSystem).Get(gangSchdName, metav1.GetOptions{})
+		if err != nil {
+			log.Debugf("Failed to find %s due to %v", gangSchdName, err)
+		} else {
+			log.Debugf("Found %s successfully, the gang scheduler is enabled in the cluster.", gangSchdName)
+			gangCapablity = true
+		}
+	}
+
+	submitArgs.HasGangScheduler = gangCapablity
 }
 
 func submitTFJob(args []string, submitArgs *submitTFJobArgs) (err error) {
